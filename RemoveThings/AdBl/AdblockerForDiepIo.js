@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Diep.io UBlock-Style Ad Blocker (Improved)
+// @name         Diep.io Hardcore Ad Blocker
 // @namespace    http://tampermonkey.net/
-// @version      0.0.2
-// @description  Blocks in-game ads and dynamically loaded ones with 100ms scan interval
-// @author       you
+// @version      1.0.0
+// @description  Blocks all known ad elements and requests on diep.io, including Bing and Eiendomsmegler native ads
+// @author       eartwindfirelolreal
 // @match        *://*.diep.io/*
 // @grant        none
 // @run-at       document-start
@@ -12,179 +12,106 @@
 (function () {
     'use strict';
 
-    const adUrlPatterns = [
-        'doubleclick.net',
-        'google-analytics.com',
-        'googlesyndication.com',
-        'googleadservices.com',
-        'adsystem',
-        'adservice',
-        'bing.com/api',
-        'bing.com/aclick',
-        'mediation/tracking',
-        'adunit=',
-        'bidderid=',
-        'trafficgroup=',
-        'eiendomsmegler.no',
-        'adf.ly',
-        'linkvertise.com',
-        'lootlinks',
-        'shortly',
-        'shorte.st',
-        't.co',
-        'clickbank.net',
-        'outbrain.com',
-        'taboola.com'
+    const hardcoreBlocklist = [
+        "bing.com", "eiendomsmegler.no", "doubleclick.net", "googlesyndication.com",
+        "adservice.google.com", "googleads.g.doubleclick.net", "adnxs.com", "adform.net",
+        "zedo.com", "moatads.com", "yieldmo.com", "media.net", "outbrain.com", "taboola.com",
+        "linkvertise.com", "lootlinks.com", "adfly.com", "shorte.st", "propellerads.com",
+        "popads.net", "tradedoubler.com", "revcontent.com", "mgid.com"
     ];
 
-    const adTextIndicators = [
-        'advertisement',
-        'advertisment',
-        'sponsored',
-        'promotion',
-        'publicity',
-        'ad',
-        'ads',
-        'advert',
-        'eiendomsmegler',
-        'megler'
-    ];
-
-    function hideAdElement(el) {
-        if (!el || el.hasAttribute('data-adblocked')) return;
-        if (['HTML', 'BODY', 'HEAD', 'CANVAS'].includes(el.tagName)) return;
-
-        el.style.setProperty('display', 'none', 'important');
-        el.style.setProperty('visibility', 'hidden', 'important');
-        el.style.setProperty('opacity', '0', 'important');
-        el.style.setProperty('pointer-events', 'none', 'important');
-        el.setAttribute('data-adblocked', 'true');
-    }
-
-    function isLikelyAd(el) {
-        if (!el.tagName || ['SCRIPT', 'STYLE'].includes(el.tagName)) return false;
-
-        const text = (el.textContent || '').toLowerCase();
-        if (adTextIndicators.some(ind => text === ind)) return true;
-
-        const id = (el.id || '').toLowerCase();
-        const cls = (typeof el.className === 'string' ? el.className : '').toLowerCase();
-        if ((id.includes('ad') && id.length < 10) || id.includes('banner') || id.includes('promo')) return true;
-        if ((cls.includes('ad') && cls.length < 10) || cls.includes('banner') || cls.includes('promo')) return true;
-
-        if (el.tagName === 'A' && el.href) {
-            const href = el.href.toLowerCase();
-            if (adUrlPatterns.some(p => href.includes(p))) return true;
+    const style = document.createElement("style");
+    style.innerHTML = `
+        iframe[src*="bing.com"], a[href*="bing.com"],
+        iframe[src*="eiendomsmegler.no"], a[href*="eiendomsmegler.no"],
+        div:has(iframe[src*="eiendomsmegler.no"]), div:has(a[href*="eiendomsmegler.no"]),
+        div[class*="ad"], div[id*="ad"], div[class*="sponsor"], div[id*="sponsor"],
+        [aria-label*="ad"], [aria-label*="sponsored"], [data-testid*="ad"],
+        iframe[src*="ads"], a[href*="ads"] {
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
         }
+    `;
+    document.documentElement.appendChild(style);
 
-        if (el.tagName === 'IFRAME' && el.src) {
-            const src = el.src.toLowerCase();
-            if (adUrlPatterns.some(p => src.includes(p))) return true;
-        }
-
-        return false;
-    }
-
-    function processNewElements(nodes) {
-        nodes.forEach(node => {
-            if (node.nodeType !== 1 || node.hasAttribute('data-adblocked')) return;
-
-            if (isLikelyAd(node)) {
-                hideAdElement(node);
-                return;
-            }
-
-            if (node.tagName && node.textContent?.trim().toLowerCase() === 'advertisement') {
-                hideAdElement(node);
-                if (node.parentElement && node.parentElement.children.length <= 3) {
-                    hideAdElement(node.parentElement);
+    // Mutation Observer for new ads
+    const observer = new MutationObserver((mutations) => {
+        for (let mutation of mutations) {
+            mutation.addedNodes.forEach(node => {
+                if (node.nodeType !== 1) return;
+                if (hardcoreBlocklist.some(domain => {
+                    return (
+                        (node.src && node.src.includes(domain)) ||
+                        (node.href && node.href.includes(domain)) ||
+                        (node.innerHTML && node.innerHTML.includes(domain))
+                    );
+                })) {
+                    node.remove();
                 }
-                return;
-            }
-
-            if (node.children?.length > 0) {
-                processNewElements([...node.children]);
-            }
-        });
-    }
-
-    const observer = new MutationObserver(mutations => {
-        for (const mutation of mutations) {
-            if (mutation.addedNodes.length > 0) {
-                processNewElements([...mutation.addedNodes]);
-            }
+                if (node.querySelectorAll) {
+                    node.querySelectorAll('*').forEach(child => {
+                        if (hardcoreBlocklist.some(domain => {
+                            return (
+                                (child.src && child.src.includes(domain)) ||
+                                (child.href && child.href.includes(domain)) ||
+                                (child.innerHTML && child.innerHTML.includes(domain))
+                            );
+                        })) {
+                            child.remove();
+                        }
+                    });
+                }
+            });
         }
     });
 
-    function startObserver() {
-        if (document.body) {
-            observer.observe(document.body, { childList: true, subtree: true });
-            processNewElements([...document.body.children]);
-        }
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', startObserver);
-    } else {
-        startObserver();
-    }
-
-    // Request blocking
-    const origFetch = window.fetch;
-    window.fetch = function (url, opts) {
-        if (typeof url === 'string' && adUrlPatterns.some(p => url.toLowerCase().includes(p))) {
-            console.log('Blocked fetch:', url);
-            return Promise.resolve(new Response('', { status: 200 }));
-        }
-        return origFetch.apply(this, arguments);
+    const startObserver = () => {
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
     };
 
-    const origOpen = XMLHttpRequest.prototype.open;
+    if (document.readyState !== "loading") {
+        startObserver();
+    } else {
+        document.addEventListener("DOMContentLoaded", startObserver);
+    }
+
+    // Network request blocking
+    const blockRequest = (url) => {
+        return hardcoreBlocklist.some(domain => url.includes(domain));
+    };
+
+    const originalFetch = window.fetch;
+    window.fetch = function () {
+        const url = arguments[0];
+        if (typeof url === "string" && blockRequest(url)) {
+            console.log("Blocked fetch to:", url);
+            return Promise.resolve(new Response("", { status: 204 }));
+        }
+        return originalFetch.apply(this, arguments);
+    };
+
+    const originalOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (method, url) {
-        if (typeof url === 'string' && adUrlPatterns.some(p => url.toLowerCase().includes(p))) {
-            console.log('Blocked XHR:', url);
+        if (typeof url === "string" && blockRequest(url)) {
+            console.log("Blocked XHR to:", url);
             this.abort();
             return;
         }
-        return origOpen.apply(this, arguments);
+        return originalOpen.apply(this, arguments);
     };
 
-    // Aggressive periodic scanner every 100ms
+    // Rapid scan loop
     setInterval(() => {
-        document.querySelectorAll('a[href*="eiendomsmegler.no"]').forEach(el => {
-            hideAdElement(el);
-            if (el.parentElement) hideAdElement(el.parentElement);
-        });
-
-        const adTextEls = document.evaluate(
-            "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'advertisement')]",
-            document, null, XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE, null
-        );
-
-        for (let i = 0; i < adTextEls.snapshotLength; i++) {
-            const el = adTextEls.snapshotItem(i);
-            if (el && !el.hasAttribute('data-adblocked')) {
-                hideAdElement(el);
-                if (el.parentElement && el.parentElement.children.length <= 3) {
-                    hideAdElement(el.parentElement);
-                }
-            }
-        }
-
-        document.querySelectorAll('div[class*="banner"], div[id*="banner"]').forEach(el => {
-            if (!el.hasAttribute('data-adblocked')) hideAdElement(el);
-        });
-
-        // All <a> ad link checks
-        document.querySelectorAll('a[href]').forEach(el => {
-            const href = el.href.toLowerCase();
-            if (adUrlPatterns.some(p => href.includes(p))) {
-                hideAdElement(el);
-                if (el.parentElement) hideAdElement(el.parentElement);
+        document.querySelectorAll('a[href], iframe[src]').forEach(el => {
+            const src = el.src || el.href;
+            if (src && blockRequest(src)) {
+                el.remove();
             }
         });
-
-    }, 100); // 100ms
-
-    console.log('[✓] Diep.io Ad Blocker initialized (100ms scan rate)');
+    }, 40); // 40ms = 25 checks/second
 })();
